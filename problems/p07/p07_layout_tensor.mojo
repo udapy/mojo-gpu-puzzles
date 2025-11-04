@@ -18,11 +18,13 @@ fn add_10_blocks_2d[
 ](
     output: LayoutTensor[mut=True, dtype, out_layout],
     a: LayoutTensor[mut=False, dtype, a_layout],
-    size: Int,
+    size: UInt,
 ):
     row = block_dim.y * block_idx.y + thread_idx.y
     col = block_dim.x * block_idx.x + thread_idx.x
-    # FILL ME IN (roughly 2 lines)
+
+    if row < size and col < size:
+        output[row, col] = a[row, col] + 10.0
 
 
 # ANCHOR_END: add_10_blocks_2d_layout_tensor
@@ -31,7 +33,7 @@ fn add_10_blocks_2d[
 def main():
     with DeviceContext() as ctx:
         out_buf = ctx.enqueue_create_buffer[dtype](SIZE * SIZE).enqueue_fill(0)
-        out_tensor = LayoutTensor[dtype, out_layout, MutableAnyOrigin](
+        out_tensor = LayoutTensor[dtype, out_layout, MutAnyOrigin](
             out_buf.unsafe_ptr()
         )
 
@@ -48,9 +50,7 @@ def main():
                     a_host[k] = k
                     expected_buf[k] = k + 10
 
-        a_tensor = LayoutTensor[dtype, a_layout, MutableAnyOrigin](
-            a.unsafe_ptr()
-        )
+        a_tensor = LayoutTensor[dtype, a_layout, MutAnyOrigin](a.unsafe_ptr())
 
         ctx.enqueue_function[add_10_blocks_2d[out_layout, a_layout]](
             out_tensor,
@@ -62,14 +62,14 @@ def main():
 
         ctx.synchronize()
 
-        expected_tensor = LayoutTensor[dtype, out_layout, MutableAnyOrigin](
+        expected_tensor = LayoutTensor[dtype, out_layout, MutAnyOrigin](
             expected_buf.unsafe_ptr()
         )
 
         with out_buf.map_to_host() as out_buf_host:
             print(
                 "out:",
-                LayoutTensor[dtype, out_layout, MutableAnyOrigin](
+                LayoutTensor[dtype, out_layout, MutAnyOrigin](
                     out_buf_host.unsafe_ptr()
                 ),
             )
