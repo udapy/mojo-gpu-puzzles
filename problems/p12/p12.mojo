@@ -17,10 +17,29 @@ fn dot_product(
     output: UnsafePointer[Scalar[dtype]],
     a: UnsafePointer[Scalar[dtype]],
     b: UnsafePointer[Scalar[dtype]],
-    size: Int,
+    size: UInt,
 ):
-    # FILL ME IN (roughly 13 lines)
-    ...
+    shared = stack_allocation[
+        TPB, Scalar[dtype], address_space = AddressSpace.SHARED
+    ]()
+    global_i = block_dim.x * block_idx.x + thread_idx.x
+    local_i = thread_idx.x
+
+    if global_i < size:
+        shared[global_i] = a[global_i] * b[global_i]
+
+    barrier()
+
+    stride = UInt(TPB // 2)
+    while stride > 0:
+        if local_i < stride:
+            shared[local_i] += shared[local_i + stride]
+
+        barrier()
+        stride //= 2
+
+    if local_i == 0:
+        output[0] = shared[0]
 
 
 # ANCHOR_END: dot_product
