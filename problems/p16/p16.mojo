@@ -1,4 +1,5 @@
 from sys import size_of, argv
+from math import log2
 from testing import assert_equal
 from gpu.host import DeviceContext
 
@@ -19,13 +20,21 @@ alias layout = Layout.row_major(SIZE, SIZE)
 fn naive_matmul[
     layout: Layout, size: Int
 ](
-    output: LayoutTensor[mut=True, dtype, layout],
-    a: LayoutTensor[mut=False, dtype, layout],
-    b: LayoutTensor[mut=False, dtype, layout],
+    output: LayoutTensor[dtype, layout, MutAnyOrigin],
+    a: LayoutTensor[dtype, layout, ImmutAnyOrigin],
+    b: LayoutTensor[dtype, layout, ImmutAnyOrigin],
 ):
     row = block_dim.y * block_idx.y + thread_idx.y
     col = block_dim.x * block_idx.x + thread_idx.x
-    # FILL ME IN (roughly 6 lines)
+
+    if Int(row) < size and Int(col) < size:
+        var acc: output.element_type = 0
+
+        @parameter
+        for k in range(size):
+            acc += a[row, k] * b[k, col]
+
+        output[row, col] = acc
 
 
 # ANCHOR_END: naive_matmul
@@ -35,14 +44,18 @@ fn naive_matmul[
 fn single_block_matmul[
     layout: Layout, size: Int
 ](
-    output: LayoutTensor[mut=True, dtype, layout],
-    a: LayoutTensor[mut=False, dtype, layout],
-    b: LayoutTensor[mut=False, dtype, layout],
+    output: LayoutTensor[dtype, layout, MutAnyOrigin],
+    a: LayoutTensor[dtype, layout, ImmutAnyOrigin],
+    b: LayoutTensor[dtype, layout, ImmutAnyOrigin],
 ):
     row = block_dim.y * block_idx.y + thread_idx.y
     col = block_dim.x * block_idx.x + thread_idx.x
     local_row = thread_idx.y
     local_col = thread_idx.x
+    _ = row
+    _ = col
+    _ = local_row
+    _ = local_col
     # FILL ME IN (roughly 12 lines)
 
 
@@ -58,14 +71,18 @@ alias layout_tiled = Layout.row_major(SIZE_TILED, SIZE_TILED)
 fn matmul_tiled[
     layout: Layout, size: Int
 ](
-    output: LayoutTensor[mut=True, dtype, layout],
-    a: LayoutTensor[mut=False, dtype, layout],
-    b: LayoutTensor[mut=False, dtype, layout],
+    output: LayoutTensor[dtype, layout, MutAnyOrigin],
+    a: LayoutTensor[dtype, layout, ImmutAnyOrigin],
+    b: LayoutTensor[dtype, layout, ImmutAnyOrigin],
 ):
     local_row = thread_idx.y
     local_col = thread_idx.x
     tiled_row = block_idx.y * TPB + thread_idx.y
     tiled_col = block_idx.x * TPB + thread_idx.x
+    _ = local_row
+    _ = local_col
+    _ = tiled_row
+    _ = tiled_col
     # FILL ME IN (roughly 20 lines)
 
 
@@ -106,12 +123,17 @@ def main():
                             inp1_host[i * size + k] * inp2_host[k * size + j]
                         )
 
-        out_tensor = LayoutTensor[mut=False, dtype, layout](out.unsafe_ptr())
-        a_tensor = LayoutTensor[mut=False, dtype, layout](inp1.unsafe_ptr())
-        b_tensor = LayoutTensor[mut=False, dtype, layout](inp2.unsafe_ptr())
+        out_tensor = LayoutTensor[dtype, layout, MutAnyOrigin](out.unsafe_ptr())
+        a_tensor = LayoutTensor[dtype, layout, ImmutAnyOrigin](
+            inp1.unsafe_ptr()
+        )
+        b_tensor = LayoutTensor[dtype, layout, ImmutAnyOrigin](
+            inp2.unsafe_ptr()
+        )
 
         if argv()[1] == "--naive":
-            ctx.enqueue_function[naive_matmul[layout, SIZE]](
+            alias kernel_naive = naive_matmul[layout, SIZE]
+            ctx.enqueue_function_checked[kernel_naive, kernel_naive](
                 out_tensor,
                 a_tensor,
                 b_tensor,
@@ -119,7 +141,8 @@ def main():
                 block_dim=THREADS_PER_BLOCK,
             )
         elif argv()[1] == "--single-block":
-            ctx.enqueue_function[single_block_matmul[layout, SIZE]](
+            alias kernel_single = single_block_matmul[layout, SIZE]
+            ctx.enqueue_function_checked[kernel_single, kernel_single](
                 out_tensor,
                 a_tensor,
                 b_tensor,
@@ -128,17 +151,18 @@ def main():
             )
         elif argv()[1] == "--tiled":
             # Need to update the layout of the tensors to the tiled layout
-            out_tensor_tiled = LayoutTensor[mut=False, dtype, layout_tiled](
+            out_tensor_tiled = LayoutTensor[dtype, layout_tiled, MutAnyOrigin](
                 out.unsafe_ptr()
             )
-            a_tensor_tiled = LayoutTensor[mut=False, dtype, layout_tiled](
+            a_tensor_tiled = LayoutTensor[dtype, layout_tiled, ImmutAnyOrigin](
                 inp1.unsafe_ptr()
             )
-            b_tensor_tiled = LayoutTensor[mut=False, dtype, layout_tiled](
+            b_tensor_tiled = LayoutTensor[dtype, layout_tiled, ImmutAnyOrigin](
                 inp2.unsafe_ptr()
             )
 
-            ctx.enqueue_function[matmul_tiled[layout_tiled, SIZE_TILED]](
+            alias kernel_tiled = matmul_tiled[layout_tiled, SIZE_TILED]
+            ctx.enqueue_function_checked[kernel_tiled, kernel_tiled](
                 out_tensor_tiled,
                 a_tensor_tiled,
                 b_tensor_tiled,
